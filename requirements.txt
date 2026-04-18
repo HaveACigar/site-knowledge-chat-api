@@ -1,0 +1,7 @@
+fastapi>=0.111
+uvicorn[standard]>=0.30
+firebase-admin>=6.5
+google-cloud-firestore>=2.16
+openai>=1.50
+pydantic>=2.8
+python-dotenv>=1.0
