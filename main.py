@@ -62,6 +62,10 @@ class SessionCreate(BaseModel):
     title: Optional[str] = None
 
 
+class PublicChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=4000)
+
+
 SYSTEM_PROMPT = """
 You are ArieAI, the portfolio assistant for Arie DeKraker's website.
 
@@ -105,6 +109,26 @@ def session_ref(uid: str, session_id: str):
 
 def message_ref(uid: str, session_id: str):
     return session_ref(uid, session_id).collection("messages")
+
+
+def generate_answer(message: str, history: Optional[list[dict]] = None) -> str:
+    if not client:
+        raise HTTPException(status_code=500, detail="LLM provider is not configured")
+
+    completion = client.responses.create(
+        model=OPENAI_MODEL,
+        input=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": f"Site knowledge: {SITE_KNOWLEDGE}"},
+            *(history or []),
+            {"role": "user", "content": message},
+        ],
+        temperature=0.2,
+    )
+    answer = completion.output_text.strip()
+    if not answer:
+        answer = "I couldn't generate a grounded answer from the site knowledge."
+    return answer
 
 
 @app.get("/health")
@@ -169,9 +193,6 @@ def get_session_messages(session_id: str, user=Depends(get_user)):
 
 @app.post("/chat")
 def chat(payload: ChatRequest, user=Depends(get_user)):
-    if not client:
-        raise HTTPException(status_code=500, detail="LLM provider is not configured")
-
     now = datetime.now(timezone.utc).isoformat()
     session_id = payload.session_id or uuid4().hex
     sess = session_ref(user["uid"], session_id)
@@ -198,19 +219,7 @@ def chat(payload: ChatRequest, user=Depends(get_user)):
         if data.get("role") in {"user", "assistant"}:
             history.append({"role": data["role"], "content": data.get("content", "")})
 
-    completion = client.responses.create(
-        model=OPENAI_MODEL,
-        input=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "system", "content": f"Site knowledge: {SITE_KNOWLEDGE}"},
-            *history,
-            {"role": "user", "content": payload.message},
-        ],
-        temperature=0.2,
-    )
-    answer = completion.output_text.strip()
-    if not answer:
-        answer = "I couldn't generate a grounded answer from the site knowledge."
+    answer = generate_answer(payload.message, history)
 
     message_ref(user["uid"], session_id).document().set({
         "role": "assistant",
@@ -219,3 +228,9 @@ def chat(payload: ChatRequest, user=Depends(get_user)):
     })
     sess.update({"updated_at": datetime.now(timezone.utc).isoformat()})
     return {"session_id": session_id, "answer": answer}
+
+
+@app.post("/chat/public")
+def public_chat(payload: PublicChatRequest):
+    answer = generate_answer(payload.message)
+    return {"answer": answer}
