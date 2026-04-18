@@ -56,7 +56,7 @@ jobs:
             --cpu 1 \
             --max-instances 3 \
             --timeout 300 \
-            --set-env-vars OPENAI_MODEL="$OPENAI_MODEL",FIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID",ALLOWED_ORIGINS='$ALLOWED_ORIGINS',OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}"
+            --set-env-vars "^|^OPENAI_MODEL=$OPENAI_MODEL|FIREBASE_PROJECT_ID=$FIREBASE_PROJECT_ID|ALLOWED_ORIGINS=$ALLOWED_ORIGINS|OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}"
       - name: Show service URL
         run: |
           URL=$(gcloud run services describe "$SERVICE_NAME" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')
