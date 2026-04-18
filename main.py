@@ -13,9 +13,25 @@ from pydantic import BaseModel, Field
 from knowledge_base import SITE_KNOWLEDGE
 
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
-ALLOWED_ORIGIN = os.getenv("ALLOWED_ORIGIN", "https://www.arieswebsite.com")
+ALLOWED_ORIGIN = os.getenv("ALLOWED_ORIGIN", "")
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 FIREBASE_PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID", "meta-method-216117")
+
+
+def parse_allowed_origins() -> list[str]:
+    # Support either a single origin env var or a comma-separated list.
+    raw = ALLOWED_ORIGINS or ALLOWED_ORIGIN
+    if not raw:
+        return [
+            "https://www.arieswebsite.com",
+            "https://arieswebsite.com",
+            "http://localhost:3000",
+        ]
+    origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+    if "http://localhost:3000" not in origins:
+        origins.append("http://localhost:3000")
+    return origins
 
 if not firebase_admin._apps:
     try:
@@ -30,7 +46,7 @@ firestore_client = firestore.client()
 app = FastAPI(title="Arie Site Assistant API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[ALLOWED_ORIGIN, "http://localhost:3000"],
+    allow_origins=parse_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
