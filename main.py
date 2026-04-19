@@ -66,6 +66,12 @@ class PublicChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=4000)
 
 
+class UserChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=4000)
+    id_token: str = Field(..., min_length=10)
+    session_id: Optional[str] = None
+
+
 SYSTEM_PROMPT = """
 You are ArieAI, the portfolio assistant for Arie DeKraker's website.
 
@@ -95,6 +101,13 @@ def get_user(authorization: Optional[str] = Header(default=None)):
     try:
         decoded = auth.verify_id_token(token)
         return decoded
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail="Invalid auth token") from exc
+
+
+def decode_id_token_or_401(id_token: str):
+    try:
+        return auth.verify_id_token(id_token)
     except Exception as exc:
         raise HTTPException(status_code=401, detail="Invalid auth token") from exc
 
@@ -234,3 +247,44 @@ def chat(payload: ChatRequest, user=Depends(get_user)):
 def public_chat(payload: PublicChatRequest):
     answer = generate_answer(payload.message)
     return {"answer": answer}
+
+
+@app.post("/chat/user")
+def user_chat(payload: UserChatRequest):
+    user = decode_id_token_or_401(payload.id_token)
+
+    now = datetime.now(timezone.utc).isoformat()
+    session_id = payload.session_id or uuid4().hex
+    sess = session_ref(user["uid"], session_id)
+    existing = sess.get()
+    if not existing.exists:
+        sess.set({
+            "title": payload.message[:60],
+            "created_at": now,
+            "updated_at": now,
+        })
+    else:
+        sess.update({"updated_at": now})
+
+    message_ref(user["uid"], session_id).document().set({
+        "role": "user",
+        "content": payload.message,
+        "created_at": now,
+    })
+
+    history_docs = message_ref(user["uid"], session_id).order_by("created_at").limit_to_last(12).stream()
+    history = []
+    for doc in history_docs:
+        data = doc.to_dict() or {}
+        if data.get("role") in {"user", "assistant"}:
+            history.append({"role": data["role"], "content": data.get("content", "")})
+
+    answer = generate_answer(payload.message, history)
+
+    message_ref(user["uid"], session_id).document().set({
+        "role": "assistant",
+        "content": answer,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    sess.update({"updated_at": datetime.now(timezone.utc).isoformat()})
+    return {"session_id": session_id, "answer": answer}
