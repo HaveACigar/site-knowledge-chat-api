@@ -10,7 +10,7 @@ env:
   REGION: us-central1
   SERVICE_NAME: site-knowledge-chat-api
   OPENAI_MODEL: gpt-4.1-mini
-  FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID || vars.GCP_PROJECT_ID || 'meta-method-216117' }}
+  FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID || 'react-contact-form-26c58' }}
   ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS || 'https://www.arieswebsite.com,https://arieswebsite.com' }}
 
 jobs:
@@ -56,7 +56,8 @@ jobs:
             --cpu 1 \
             --max-instances 3 \
             --timeout 300 \
-            --set-env-vars "^|^OPENAI_MODEL=$OPENAI_MODEL|FIREBASE_PROJECT_ID=$FIREBASE_PROJECT_ID|ALLOWED_ORIGINS=$ALLOWED_ORIGINS|OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}"
+            --set-env-vars "^|^OPENAI_MODEL=$OPENAI_MODEL|FIREBASE_PROJECT_ID=$FIREBASE_PROJECT_ID|ALLOWED_ORIGINS=$ALLOWED_ORIGINS" \
+            --set-secrets "OPENAI_API_KEY=OPENAI_API_KEY:latest"
       - name: Show service URL
         run: |
           URL=$(gcloud run services describe "$SERVICE_NAME" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')
