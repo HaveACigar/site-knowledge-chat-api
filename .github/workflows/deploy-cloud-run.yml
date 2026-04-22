@@ -18,13 +18,15 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write
     steps:
       - name: Checkout
         uses: actions/checkout@v5
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          workload_identity_provider: "projects/1044248854820/locations/global/workloadIdentityPools/github-pool/providers/github-provider"
+          service_account: "github-deployer@meta-method-216117.iam.gserviceaccount.com"
       - name: Set up Google Cloud SDK
         uses: google-github-actions/setup-gcloud@v3
       - name: Build and push container image
