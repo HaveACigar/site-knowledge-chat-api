@@ -225,7 +225,7 @@ def chat(payload: ChatRequest, user=Depends(get_user)):
         "created_at": now,
     })
 
-    history_docs = message_ref(user["uid"], session_id).order_by("created_at").limit_to_last(12).stream()
+    history_docs = message_ref(user["uid"], session_id).order_by("created_at").limit_to_last(12).get()
     history = []
     for doc in history_docs:
         data = doc.to_dict() or {}
@@ -272,7 +272,7 @@ def user_chat(payload: UserChatRequest):
         "created_at": now,
     })
 
-    history_docs = message_ref(user["uid"], session_id).order_by("created_at").limit_to_last(12).stream()
+    history_docs = message_ref(user["uid"], session_id).order_by("created_at").limit_to_last(12).get()
     history = []
     for doc in history_docs:
         data = doc.to_dict() or {}
