@@ -11,7 +11,7 @@ env:
   SERVICE_NAME: site-knowledge-chat-api
   OPENAI_MODEL: gpt-4.1-mini
   FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID || 'react-contact-form-26c58' }}
-  ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS || 'https://www.arieswebsite.com,https://arieswebsite.com' }}
+  ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS || 'https://www.arieswebsite.com,https://arieswebsite.com,https://meta-method-216117.uc.r.appspot.com,http://localhost:3000' }}
 
 jobs:
   deploy:
