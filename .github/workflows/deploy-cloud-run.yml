@@ -29,29 +29,13 @@ jobs:
           service_account: "github-deployer@meta-method-216117.iam.gserviceaccount.com"
       - name: Set up Google Cloud SDK
         uses: google-github-actions/setup-gcloud@v3
-      - name: Build and push container image
-        run: |
-          BUILD_OUTPUT=$(gcloud builds submit --project "$PROJECT_ID" --tag "gcr.io/$PROJECT_ID/$SERVICE_NAME:$GITHUB_SHA" --timeout=2400s --async . 2>&1)
-          echo "$BUILD_OUTPUT"
-          BUILD_ID=$(printf '%s\n' "$BUILD_OUTPUT" | sed -n 's|.*builds/\([A-Za-z0-9-]*\).*|\1|p' | head -1)
-          if [ -z "$BUILD_ID" ]; then exit 1; fi
-          while true; do
-            STATUS=$(gcloud builds describe "$BUILD_ID" --project "$PROJECT_ID" --format='value(status)')
-            echo "Cloud Build status: $STATUS"
-            if [ "$STATUS" = "SUCCESS" ]; then break; fi
-            if [ "$STATUS" = "FAILURE" ] || [ "$STATUS" = "INTERNAL_ERROR" ] || [ "$STATUS" = "TIMEOUT" ] || [ "$STATUS" = "CANCELLED" ] || [ "$STATUS" = "EXPIRED" ]; then
-              gcloud builds describe "$BUILD_ID" --project "$PROJECT_ID" --format='yaml(status,logUrl,results,images)'
-              exit 1
-            fi
-            sleep 15
-          done
       - name: Deploy to Cloud Run
         run: |
           gcloud run deploy "$SERVICE_NAME" \
             --project "$PROJECT_ID" \
             --region "$REGION" \
             --platform managed \
-            --image "gcr.io/$PROJECT_ID/$SERVICE_NAME:$GITHUB_SHA" \
+            --source . \
             --allow-unauthenticated \
             --port 8080 \
             --memory 1Gi \
