@@ -1,7 +1,7 @@
 SITE_KNOWLEDGE = {
     "owner": {
         "name": "Arie DeKraker",
-        "title": "Senior Data Analyst & Applied ML Scientist",
+        "title": "Intermediate Data Analyst",
         "tagline": "Data professional with a Master's specialization in Data Science and deep experience in designing, developing, and deploying high-impact, end-to-end data solutions and scalable backend systems.",
         "email": "ariedekraker@gmail.com",
         "website": "https://www.arieswebsite.com",
