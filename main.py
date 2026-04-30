@@ -1,14 +1,19 @@
+import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Generator, Optional
 from uuid import uuid4
 
 import firebase_admin
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from firebase_admin import auth, credentials, firestore
 from openai import OpenAI
 from pydantic import BaseModel, Field
+
+_thread_pool = ThreadPoolExecutor(max_workers=8)
 
 from knowledge_base import SITE_KNOWLEDGE
 
@@ -124,24 +129,44 @@ def message_ref(uid: str, session_id: str):
     return session_ref(uid, session_id).collection("messages")
 
 
+def _build_input(message: str, history: Optional[list[dict]] = None) -> list[dict]:
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": f"Site knowledge: {SITE_KNOWLEDGE}"},
+        *(history or []),
+        {"role": "user", "content": message},
+    ]
+
+
 def generate_answer(message: str, history: Optional[list[dict]] = None) -> str:
     if not client:
         raise HTTPException(status_code=500, detail="LLM provider is not configured")
 
     completion = client.responses.create(
         model=OPENAI_MODEL,
-        input=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "system", "content": f"Site knowledge: {SITE_KNOWLEDGE}"},
-            *(history or []),
-            {"role": "user", "content": message},
-        ],
+        input=_build_input(message, history),
         temperature=0.2,
     )
     answer = completion.output_text.strip()
     if not answer:
         answer = "I couldn't generate a grounded answer from the site knowledge."
     return answer
+
+
+def generate_answer_stream(message: str, history: Optional[list[dict]] = None) -> Generator[str, None, None]:
+    if not client:
+        yield f"data: {json.dumps({'error': 'LLM provider is not configured'})}\n\n"
+        return
+
+    with client.responses.stream(
+        model=OPENAI_MODEL,
+        input=_build_input(message, history),
+        temperature=0.2,
+    ) as stream:
+        for event in stream:
+            if event.type == "response.output_text.delta":
+                yield f"data: {json.dumps({'delta': event.delta})}\n\n"
+    yield "data: [DONE]\n\n"
 
 
 @app.get("/health")
@@ -219,13 +244,15 @@ def chat(payload: ChatRequest, user=Depends(get_user)):
     else:
         sess.update({"updated_at": now})
 
-    message_ref(user["uid"], session_id).document().set({
-        "role": "user",
-        "content": payload.message,
-        "created_at": now,
-    })
-
+    # Write user message and fetch history in parallel
+    user_msg_ref = message_ref(user["uid"], session_id).document()
+    write_future = _thread_pool.submit(
+        user_msg_ref.set,
+        {"role": "user", "content": payload.message, "created_at": now},
+    )
     history_docs = message_ref(user["uid"], session_id).order_by("created_at").limit_to_last(12).get()
+    write_future.result()  # ensure write completes before LLM call
+
     history = []
     for doc in history_docs:
         data = doc.to_dict() or {}
@@ -234,19 +261,90 @@ def chat(payload: ChatRequest, user=Depends(get_user)):
 
     answer = generate_answer(payload.message, history)
 
-    message_ref(user["uid"], session_id).document().set({
-        "role": "assistant",
-        "content": answer,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    })
-    sess.update({"updated_at": datetime.now(timezone.utc).isoformat()})
+    answer_time = datetime.now(timezone.utc).isoformat()
+    # Write assistant message and update session timestamp in parallel
+    asst_msg_ref = message_ref(user["uid"], session_id).document()
+    write_future = _thread_pool.submit(
+        asst_msg_ref.set,
+        {"role": "assistant", "content": answer, "created_at": answer_time},
+    )
+    _thread_pool.submit(sess.update, {"updated_at": answer_time})
+    write_future.result()
+
     return {"session_id": session_id, "answer": answer}
+
+
+@app.post("/chat/stream")
+def chat_stream(payload: ChatRequest, user=Depends(get_user)):
+    now = datetime.now(timezone.utc).isoformat()
+    session_id = payload.session_id or uuid4().hex
+    sess = session_ref(user["uid"], session_id)
+    existing = sess.get()
+    if not existing.exists:
+        sess.set({
+            "title": payload.message[:60],
+            "created_at": now,
+            "updated_at": now,
+        })
+    else:
+        sess.update({"updated_at": now})
+
+    # Write user message and fetch history in parallel
+    user_msg_ref = message_ref(user["uid"], session_id).document()
+    write_future = _thread_pool.submit(
+        user_msg_ref.set,
+        {"role": "user", "content": payload.message, "created_at": now},
+    )
+    history_docs = message_ref(user["uid"], session_id).order_by("created_at").limit_to_last(12).get()
+    write_future.result()
+
+    history = []
+    for doc in history_docs:
+        data = doc.to_dict() or {}
+        if data.get("role") in {"user", "assistant"}:
+            history.append({"role": data["role"], "content": data.get("content", "")})
+
+    def streamer():
+        full_answer: list[str] = []
+        # Send session_id first so the client can associate this stream
+        yield f"data: {json.dumps({'session_id': session_id})}\n\n"
+        for chunk in generate_answer_stream(payload.message, history):
+            if chunk.startswith("data: ") and chunk.strip() != "data: [DONE]":
+                try:
+                    parsed = json.loads(chunk[6:])
+                    if "delta" in parsed:
+                        full_answer.append(parsed["delta"])
+                except Exception:
+                    pass
+            yield chunk
+
+        answer = "".join(full_answer).strip()
+        if answer:
+            answer_time = datetime.now(timezone.utc).isoformat()
+            asst_msg_ref = message_ref(user["uid"], session_id).document()
+            _thread_pool.submit(asst_msg_ref.set, {"role": "assistant", "content": answer, "created_at": answer_time})
+            _thread_pool.submit(sess.update, {"updated_at": answer_time})
+
+    return StreamingResponse(
+        streamer(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/chat/public")
 def public_chat(payload: PublicChatRequest):
     answer = generate_answer(payload.message)
     return {"answer": answer}
+
+
+@app.post("/chat/public/stream")
+def public_chat_stream(payload: PublicChatRequest):
+    return StreamingResponse(
+        generate_answer_stream(payload.message),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/chat/user")

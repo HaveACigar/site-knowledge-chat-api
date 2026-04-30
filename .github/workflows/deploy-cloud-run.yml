@@ -41,6 +41,7 @@ jobs:
             --memory 1Gi \
             --cpu 1 \
             --max-instances 3 \
+            --min-instances 1 \
             --timeout 300 \
             --set-env-vars "^|^OPENAI_MODEL=$OPENAI_MODEL|FIREBASE_PROJECT_ID=$FIREBASE_PROJECT_ID|ALLOWED_ORIGINS=$ALLOWED_ORIGINS" \
             --set-secrets "OPENAI_API_KEY=OPENAI_API_KEY:latest"
